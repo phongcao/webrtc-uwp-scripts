@@ -494,7 +494,6 @@ CALL:copyTemplates %ortcGnBuildPath% %ortcGnBuildPathDestination%
 CALL:copyTemplates %gnEventingPythonScriptSource% %gnEventingPythonScriptDestination%
 CALL:copyTemplates %gnIDLPythonScriptSource% %gnIDLPythonScriptDestination%
 
-CALL:makeLink . webrtc\xplatform\webrtc\ortc\udns ortc\xplatform\udns
 CALL:makeLink . webrtc\xplatform\webrtc\ortc\idnkit ortc\xplatform\idnkit
 CALL:makeLink . webrtc\xplatform\webrtc\ortc\cryptopp ortc\xplatform\cryptopp
 CALL:makeLink . webrtc\xplatform\webrtc\ortc\ortclib ortc\xplatform\ortclib-cpp
