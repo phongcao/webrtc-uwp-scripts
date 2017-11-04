@@ -263,6 +263,8 @@ CALL:makeLink . third_party\winsdk_samples ..\winsdk_samples_v71
 CALL:makeLink . tools\gyp ..\gyp
 CALL:makeLink . tools\clang ..\chromium\tools\clang
 CALL:makeLink . third_party\udns ..\..\..\ortc\xplatform\udns
+CALL:makeLink . third_party\idnkit ..\..\..\ortc\xplatform\idnkit
+CALL:makeLink . third_party\cryptopp ..\..\..\ortc\xplatform\cryptopp
 
 GOTO:EOF
 
