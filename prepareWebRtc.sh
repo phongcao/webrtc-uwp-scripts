@@ -4,6 +4,7 @@ set -e
 
 target=all
 platform=all
+architecture=all
 logLevel=4
 platform_iOS=0
 platform_macOS=0
@@ -60,11 +61,11 @@ PROJECT_IOS_FILE=all_ios.xcodeproj
 #OUTPUT_ANDROID=out_android
 #OUTPUT_LINUX=out_linux
 
-TARGET_CPU_arm=0
-TARGET_CPU_armv7=0
-TARGET_CPU_arm64=0
-TARGET_CPU_x86=0
-TARGET_CPU_x64=1
+architecture_arm=0
+architecture_armv7=0
+architecture_arm64=0
+architecture_x86=0
+architecture_x64=0
 
 HOST_SYSTEM=mac
 HOST_OS=osx
@@ -173,27 +174,45 @@ identifyPlatform()
     if [ "$HOST_SYSTEM" == "linux" ]; then
       platform_linux=1
       platform_android=1
+      platform_iOS=0
+      platform_macOS=0
+      validInput=1
       messageText="Preparing development environment for linux and android platforms ..."
     else
       platform_iOS=1
       platform_macOS=1
+      platform_linux=0
+      platform_android=0
+      validInput=1
       messageText="Preparing development environment for iOS and macOS platforms ..."
     fi
     validInput=1
   elif [ "$platform" == "iOS" ]; then
     platform_iOS=1
+    platform_macOS=0
+    platform_linux=0
+    platform_android=0
     validInput=1
     messageText="Preparing development environment for $platform platform..."
-  elif [ "$platform" == "macOS" ]; then
+  elif [ "$platform" == "mac" ]; then
     platform_macOS=1
+    platform_iOS=0
+    platform_linux=0
+    platform_android=0
     validInput=1
     messageText="Preparing development environment for $platform platform..."
   elif [ "$platform" == "linux" ]; then
     platform_linux=1
+    platform_macOS=0
+    platform_iOS=0
+    platform_android=0
     validInput=1
     messageText="Preparing development environment for $platform platform..."
   elif [ "$platform" == "android" ]; then
     platform_android=1
+    platform_linux=0
+    platform_macOS=0
+    platform_iOS=0
     validInput=1
     messageText="Preparing development environment for $platform platform..."
   else
@@ -203,6 +222,49 @@ identifyPlatform()
   print $warning "$messageText"
 }
 
+identifyArchitecture()
+{
+  print $trace "Identifying target architecture ..."
+  if [ $platform_iOS -eq 1 ] || [ $platform_android -eq 1 ]; then
+    if [ "$architecture" == "all" ]; then
+      architecture_arm=1
+      architecture_arm64=1
+    elif [ "$architecture" == "arm" ]; then
+      architecture_arm=1
+      architecture_arm64=0
+    elif [ "$architecture" == "arm64" ]; then
+      architecture_arm=0
+      architecture_arm64=1
+    fi
+  fi
+
+  if [ $platform_macOS -eq 1 ]; then
+    if [ "$architecture" == "all" ]; then
+      architecture_x86=1
+      architecture_x64=1
+    elif [ "$architecture" == "x86" ]; then
+      architecture_x86=1
+      architecture_x64=0
+    elif [ "$architecture" == "x64" ]; then
+      architecture_x86=0
+      architecture_x64=1
+    fi
+  fi
+
+  if [ $platform_linux -eq 1 ]; then
+    if [ "$architecture" == "all" ]; then
+# architecture "all" is currently broken for linux because of broken x86. as a temporarily workaround, the following line is commented out.
+#      architecture_x86=1    
+      architecture_x64=1
+    elif [ "$architecture" == "x86" ]; then
+      architecture_x86=1
+      architecture_x64=0
+    elif [ "$architecture" == "x64" ]; then
+      architecture_x86=0
+      architecture_x64=1
+    fi
+  fi  
+}
 makeDirectory()
 {
   TARGET=$1
@@ -213,14 +275,14 @@ makeDirectory()
   if [ ! -d $TARGET ]; then
     error 1 "(makeDirectory): Unable to create folder $TARGET"
   fi
-  
+
 }
 
 copyFolder()
 {
   SOURCE=$1
   TARGET=$2
-  
+
   if [[ -n $SOURCE && -n $TARGET ]]; then
     if [ -d $SOURCE ]; then
       print $debug "Copying $SOURCE to $TARGET"
@@ -499,7 +561,7 @@ makeLinks()
   #makeLink "." "testing" "chromium/src/testing"
   #makeLink "tools" "protoc_wrapper" "../chromium/src/tools/protoc_wrapper"
   #makeLink "tools" "gyp" "../chromium/src/tools/gyp"
- 
+
   #makeLink "third_party" "protobuf" "../chromium/src/third_party/protobuf"
   #makeLink "third_party" "yasm" "../chromium/src/third_party/yasm"
   #makeLink "third_party" "opus" "../chromium/src/third_party/opus"
@@ -521,16 +583,16 @@ makeLinks()
 
 cpNewest()
 {
-  SOURCE="$1"  
+  SOURCE="$1"
   DEST="$2"
-  if [ -e "$DEST" ]; then
-    cp -u $SOURCE $DEST
-  fi
+#  if [ -e "$DEST" ]; then
+#    cp -u $SOURCE $DEST
+#  fi
   if [ ! -e "$SOURCE" ]; then
     error 1 "Failed to copy the source file $SOURCE ..."
   fi
   print $debug "Copying file from $SOURCE to $DEST"
-  cp -u $SOURCE $DEST
+  cp $SOURCE $DEST
 }
 
 updateFolders()
@@ -572,7 +634,7 @@ downloadGnBinaries()
     print $debug "Downloading gn tool ..."
     result=$(python $DepotToolsPath/download_from_google_storage.py -b chromium-gn -s buildtools/$hostBuildTools/gn.sha1)
     print $debug "$result"
-  fi  
+  fi
   if [ ! -e "buildtools/$hostBuildTools/clang-format" ]; then
     print $debug "Downloading clang-format tool ..."
     result=$(python $DepotToolsPath/download_from_google_storage.py -b chromium-clang-format -s buildtools/$hostBuildTools/clang-format.sha1)
@@ -759,7 +821,7 @@ generateProjectsForPlatform()
   if [ $? -ne 0 ]; then
     error 1 "Could not generate WebRTC projects for %1 platform, %2 CPU"
   fi
-  
+
   pushd "$outputPath/obj" 2> /dev/null
 
   #$DepotToolsPath/ninja -C "../../../$outputPath/" obj/default.stamp
@@ -773,88 +835,68 @@ generateProjects()
   print $debug "Executing generateProjects function"
 
   if [ $platform_iOS -eq 1 ]; then
-    if [ $TARGET_CPU_arm -eq 1 ]; then
+    if [ $architecture_arm -eq 1 ]; then
       generateProjectsForPlatform ios arm debug
       generateProjectsForPlatform ios arm release
     fi
-    if [ $TARGET_CPU_armv7 -eq 1 ]; then
+    if [ $architecture_armv7 -eq 1 ]; then
       generateProjectsForPlatform ios armv7 debug
       generateProjectsForPlatform ios armv7 release
     fi
-    if [ $TARGET_CPU_arm64 -eq 1 ]; then
+    if [ $architecture_arm64 -eq 1 ]; then
       generateProjectsForPlatform ios arm64 debug
       generateProjectsForPlatform ios arm64 release
-    fi
-    if [ $TARGET_CPU_x86 -eq 1 ]; then
-      generateProjectsForPlatform ios x86 debug
-      generateProjectsForPlatform ios x86 release
-    fi
-    if [ $TARGET_CPU_x64 -eq 1 ]; then
-      generateProjectsForPlatform ios x64 debug
-      generateProjectsForPlatform ios x64 release
     fi
   fi
 
   if [ $platform_macOS -eq 1 ]; then
-    if [ $TARGET_CPU_arm -eq 1 ]; then
-      generateProjectsForPlatform mac arm debug
-      generateProjectsForPlatform mac arm release
-    fi
-    if [ $TARGET_CPU_armv7 -eq 1 ]; then
-      generateProjectsForPlatform mac armv7 debug
-      generateProjectsForPlatform mac armv7 release
-    fi
-    if [ $TARGET_CPU_arm64 -eq 1 ]; then
-      generateProjectsForPlatform mac arm64 debug
-      generateProjectsForPlatform mac arm64 release
-    fi
-    if [ $TARGET_CPU_x86 -eq 1 ]; then
+    if [ $architecture_x86 -eq 1 ]; then
       generateProjectsForPlatform mac x86 debug
       generateProjectsForPlatform mac x86 release
     fi
-    if [ $TARGET_CPU_x64 -eq 1 ]; then
+    if [ $architecture_x64 -eq 1 ]; then
       generateProjectsForPlatform mac x64 debug
       generateProjectsForPlatform mac x64 release
     fi
   fi
 
   if [ $platform_linux -eq 1 ]; then
-    if [ $TARGET_CPU_arm -eq 1 ]; then
+    if [ $architecture_arm -eq 1 ]; then
       generateProjectsForPlatform linux arm debug
       generateProjectsForPlatform linux arm release
     fi
-    if [ $TARGET_CPU_armv7 -eq 1 ]; then
+    if [ $architecture_armv7 -eq 1 ]; then
       generateProjectsForPlatform linux armv7 debug
       generateProjectsForPlatform linux armv7 release
     fi
-    if [ $TARGET_CPU_arm64 -eq 1 ]; then
+    if [ $architecture_arm64 -eq 1 ]; then
       generateProjectsForPlatform linux arm64 debug
       generateProjectsForPlatform linux arm64 release
     fi
-    if [ $TARGET_CPU_x86 -eq 1 ]; then
+    if [ $architecture_x86 -eq 1 ]; then
       generateProjectsForPlatform linux x86 debug
       generateProjectsForPlatform linux x86 release
     fi
-    if [ $TARGET_CPU_x64 -eq 1 ]; then
+    if [ $architecture_x64 -eq 1 ]; then
       generateProjectsForPlatform linux x64 debug
       generateProjectsForPlatform linux x64 release
     fi
   fi
 
   if [ $platform_android -eq 1 ]; then
-    if [ $TARGET_CPU_arm -eq 1 ]; then
+    if [ $architecture_arm -eq 1 ]; then
       generateProjectsForPlatform android arm debug
       generateProjectsForPlatform android arm release
     fi
-    if [ $TARGET_CPU_armv7 -eq 1 ]; then
+    if [ $architecture_armv7 -eq 1 ]; then
       generateProjectsForPlatform android armv7 debug
       generateProjectsForPlatform android armv7 release
     fi
-    if [ $TARGET_CPU_x86 -eq 1 ]; then
+    if [ $architecture_x86 -eq 1 ]; then
       generateProjectsForPlatform android x86 debug
       generateProjectsForPlatform android x86 release
     fi
-    if [ $TARGET_CPU_x64 -eq 1 ]; then
+    if [ $architecture_x64 -eq 1 ]; then
       generateProjectsForPlatform android x64 debug
       generateProjectsForPlatform android x64 release
     fi
@@ -865,7 +907,7 @@ finished()
 {
   echo
   print $info "Success: WebRtc development environment is set."
-    
+
 }
 
 #-------------------------------------------------------------------------------
@@ -905,7 +947,7 @@ do
         shift 2
         ;;
     -help|-h)
-        help
+        helpgenerateProjects
         exit 1
         ;;
     -loglevel|-l)
@@ -942,6 +984,7 @@ print $warning "LogLevel: $logLevel"
 
 precheck
 identifyPlatform
+identifyArchitecture
 makeFolderStructure
 ##cleanPreviousResults
 ##setNinja
@@ -956,7 +999,7 @@ downloadGnBinaries
 
 generateProjects
 
-#if [ $platform_iOS -eq  1 ]; 
+#if [ $platform_iOS -eq  1 ];
 #then
 #    make_ios_project armv7
 #    make_ios_project arm64
@@ -965,7 +1008,7 @@ generateProjects
 #if [ $platform_macOS -eq  1 ]; then
 #  make_mac_project
 #fi
-  
+
 #setNinjaPathForWrappers
 popd > /dev/null
 #finished

@@ -125,6 +125,7 @@ IF /I "%platform%"=="all" (
 	SET platform_x64=1
 	SET platform_x86=1
 	SET platform_win32=1
+  SET platform_win32_x64=1
 	SET validInput=1
 	SET messageText=Preparing WebRTC development environment for arm, x64, x86 and win32 platforms ...
 ) ELSE (
@@ -181,6 +182,10 @@ CALL:generateChromiumFolders
 CALL:makeJunctionLinks
 
 CALL:updateFolders
+
+IF %platform_win32_x64% EQU 1 (
+    CALL:updateClang
+)
 
 CALL:setupDepotTools
 
@@ -426,6 +431,26 @@ IF NOT EXIST %~1\NUL (
 ) ELSE (
 	CALL:print %trace% "%~1 folder already exists"
 )
+GOTO:EOF
+
+:updateClang
+CALL:print %trace% "Running clang update ..."
+
+IF EXIST third_party\llvm-build\Release+Asserts\bin\clang-cl.exe GOTO:clangalreadyexists
+
+:: TODO Need to find workaround solution for pop-up window "Git Credential Manager for Windows". In the meanwhile, just click "Cancel" button in case pop-up window appears.
+CALL:print %warning% "In case pop-up window 'Git Credential Manager for Windows' appears after clang download, just click 'Cancel' button."
+
+CALL python tools\clang\scripts\update.py %*
+
+CALL:makeDirectory third_party\llvm
+
+CALL:makeLink . third_party\llvm chromium\src\third_party\llvm
+CALL:makeLink . third_party\llvm-build chromium\src\third_party\llvm-build
+
+:clangalreadyexists
+CALL:print %trace% "Clang already exists, skipping clang update..."
+
 GOTO:EOF
 
 :makeLink
