@@ -3,7 +3,7 @@
 :: Author:    Sergej Jovanovic
 :: Email:     sergej@gnedo.com
 :: Twitter:   @JovanovicSergej
-:: Revision:  September 2016 - initial version
+:: Revision:  August 2017 - ORTC moving to GN build system
 
 @ECHO off
 
@@ -18,15 +18,27 @@ SET ortcWebRTCWin32TemplatePath=ortc\windows\templates\libs\webrtc\webrtcForOrtc
 SET ortcWebRTCWin32DestinationPath=webrtc\xplatform\webrtc\webrtcForOrtc.Win32.vs2015.sln
 SET webRTCTemplatePath=webrtc\windows\templates\libs\webrtc\webrtcLib.sln
 SET webRTCDestinationPath=webrtc\xplatform\webrtc\webrtcLib.sln
+SET ortciOSBinariesDestinationFolder=ortc\apple\libs\
+SET ortciOSBinariesDestinationPath=ortc\apple\libs\libOrtc.dylib
+SET webrtcGnPath=webrtc\xplatform\webrtc\
+SET ortcGnPath=webrtc\xplatform\webrtc\ortc\
+SET webrtcGnBuildPath=ortc\xplatform\templates\gn\webrtcBUILD.gn
+SET webrtcGnBuildPathDestination=webrtc\xplatform\webrtc\BUILD.gn
+SET ortcGnBuildPath=ortc\xplatform\templates\gn\ortcBUILD.gn
+SET ortcGnBuildPathDestination=webrtc\xplatform\webrtc\ortc\BUILD.gn
+SET gnEventingPythonScriptSource=bin\runEventCompiler.py
+SET gnEventingPythonScriptDestination=webrtc\xplatform\webrtc\ortc\runEventCompiler.py
+SET gnIDLPythonScriptSource=bin\runIDLCompiler.py
+SET gnIDLPythonScriptDestination=webrtc\xplatform\webrtc\ortc\runIDLCompiler.py
 
 ::downloads
 SET pythonVersion=2.7.6
-SET ninjaVersion=v1.6.0
 SET pythonDestinationPath=python-%pythonVersion%.msi
-SET ninjaDestinationPath=.\bin\ninja-win.zip
+SET ortcBinariesDestinationPath=ortc\windows\projects\msvc\OrtcBinding\libOrtc.dylib
+ 
 ::urls
 SET pythonDownloadUrl=https://www.python.org/ftp/python/%pythonVersion%/python-%pythonVersion%.msi
-SET ninjaDownloadUrl=http://github.com/martine/ninja/releases/download/%ninjaVersion%/ninja-win.zip 
+SET binariesGitPath=https://github.com/ortclib/ortc-binaries.git
 
 ::helper flags
 SET taskFailed=0
@@ -55,13 +67,16 @@ SET debug=3
 SET trace=4														
 
 ::input arguments
-SET supportedInputArguments=;platform;target;help;logLevel;diagnostic;noEventing;					
+SET supportedInputArguments=;platform;target;help;logLevel;diagnostic;noEventing;getBinaries;gn;server;		
 SET target=all
 SET platform=all
 SET help=0
 SET logLevel=2
 SET diagnostic=0
 SET noEventing=0
+SET getBinaries=0
+SET server=0
+SET gn=1
 
 ::predefined messages
 SET errorMessageInvalidArgument="Invalid input argument. For the list of available arguments and usage examples, please run script with -help option."
@@ -123,6 +138,8 @@ ECHO.
 CALL:print %info% "Running prepare script ..."
 ECHO.
 
+IF EXIST bin\Config.bat CALL bin\Config.bat
+
 IF %defaultProperties% EQU 0 (
 	CALL:print %warning% "Running script parameters:"
 	CALL:print %warning% "Target: %target%"
@@ -149,14 +166,22 @@ CALL:ckeckVisualStudioBuildTools
 ::Check is perl installed
 CALL:perlCheck
 
+::Check if git installed
+CALL:gitCheck
+
+::Check if depot_tools is in PATH environment
+CALL:depotToolsPathCheck
+
 ::Check if python is installed. If it isn't install it and add in the path
 CALL:pythonSetup
 
-::Generate WebRTC VS2015 projects from gyp files
-CALL:prepareWebRTC
 
-::Install ninja if missing
-IF %platform_win32% EQU 1 CALL:installNinja
+IF %gn% EQU 1 (
+    IF %prepare_ORTC_Environemnt% EQU 1 CALL:prepareGN
+)
+
+::Generate WebRTC VS2015 projects from gn files
+CALL:prepareWebRTC
 
 IF %prepare_ORTC_Environemnt% EQU 1 (
 	::Prepare ORTC development environment
@@ -166,8 +191,13 @@ IF %prepare_ORTC_Environemnt% EQU 1 (
 	CALL:prepareCurl
 	
 	CALL:prepareEventing
+  CALL:getBinaries
+
 )
 
+IF %server% EQU 1 (
+    CALL:buildPeerCCServer
+)
 ::Finish script execution
 CALL:done
 
@@ -200,6 +230,14 @@ IF %ERRORLEVEL% EQU 1 (
 ) else (
 	CALL:print 1 "Python				    installed"
 )
+
+WHERE git > NUL 2>&1
+IF %ERRORLEVEL% EQU 1 (
+	CALL:print 0 "Git   				not installed"
+) else (
+	CALL:print 1 "Git   				    installed"
+)
+
 ECHO.
 CALL:print 2  "================================================================================"
 ECHO.
@@ -357,6 +395,28 @@ IF %ERRORLEVEL% EQU 1 (
 )
 GOTO:EOF
 
+REM check if git is installed
+:gitCheck
+WHERE git > NUL 2>&1
+IF %ERRORLEVEL% EQU 1 (
+	ECHO.
+	CALL:print 2  "================================================================================"
+	ECHO.
+	CALL:print 2  "Warning! Warning! Warning! Warning! Warning! Warning! Warning!"
+	ECHO.
+	CALL:print 2  "Git is missing."
+	CALL:print 2  "You need to have installed git to build projects properly."
+	ECHO.
+	CALL:print 2  "================================================================================"
+	ECHO.
+	CALL:print 2  "NOTE: Please restart your command shell after installing git and re-run this script..."	
+	ECHO.
+	
+	CALL:error 1 "git has to be installed before running prepare script!"
+	ECHO.	
+)
+GOTO:EOF
+
 :pythonSetup
 WHERE python > NUL 2>&1
 IF %ERRORLEVEL% EQU 1 (
@@ -407,6 +467,7 @@ CALL:copyTemplates %ortcWebRTCTemplatePath% %ortcWebRTCDestinationPath%
 CALL:copyTemplates %ortcWebRTCWin32TemplatePath% %ortcWebRTCWin32DestinationPath%
 ::CALL:copyTemplates %webRTCTemplatePath% %webRTCDestinationPath%
 
+CALL:makeLink . webrtc\xplatform\webrtc\ortc\ortclib\ortc\idl\wrapper\cx ortc\windows\wrapper\cx
 ::START solutions\ortc-lib-sdk-win.vs20151.sln
 
 GOTO:EOF
@@ -414,7 +475,11 @@ GOTO:EOF
 ::Generate WebRTC projects
 :prepareWebRTC
 
-CALL bin\prepareWebRtc.bat -platform %platform% -logLevel %logLevel%
+IF %prepare_ORTC_Environemnt% EQU 1 (
+  CALL bin\prepareWebRtc.bat -platform %platform% -logLevel %logLevel% -target ortc
+) ELSE (
+  CALL bin\prepareWebRtc.bat -platform %platform% -logLevel %logLevel%
+)
 
 GOTO:EOF
 
@@ -435,7 +500,7 @@ CALL prepareCurl.bat -logLevel %globalLogLevel%
 ::	CALL prepare.bat curl  >NUL
 ::)
 
-if !ERRORLEVEL! EQU 1 CALL:error 1 "Curl preparation has failed."
+IF !ERRORLEVEL! EQU 1 CALL:error 1 "Curl preparation has failed."
 
 POPD > NUL
 
@@ -446,11 +511,86 @@ GOTO:EOF
 
 IF %noEventing% EQU 0 (
 	CALL bin\prepareEventing.bat -platform x64 -logLevel %logLevel%
-	CALL bin\prepareEventing.bat -platform x86 -logLevel %logLevel%
-	CALL bin\prepareEventing.bat -platform win32 -logLevel %logLevel%
 )
 
 GOTO:EOF
+
+:prepareGN
+
+CALL:cleanup
+
+CALL:makeDirectory %ortcGNPath%
+
+REN %webrtcGnPath%build.gn originalBuild.gn
+IF !ERRORLEVEL! EQU 1 CALL:error 1 "Failed renamed original webrtc build.gn file" 
+
+CALL:copyTemplates %webrtcGnBuildPath% %webrtcGnBuildPathDestination%
+CALL:copyTemplates %ortcGnBuildPath% %ortcGnBuildPathDestination%
+
+CALL:copyTemplates %gnEventingPythonScriptSource% %gnEventingPythonScriptDestination%
+CALL:copyTemplates %gnIDLPythonScriptSource% %gnIDLPythonScriptDestination%
+
+CALL:makeLink . webrtc\xplatform\webrtc\ortc\ortclib ortc\xplatform\ortclib-cpp
+CALL:makeLink . webrtc\xplatform\webrtc\ortc\ortclib-services ortc\xplatform\ortclib-services-cpp
+CALL:makeLink . webrtc\xplatform\webrtc\ortc\zsLib ortc\xplatform\zsLib
+CALL:makeLink . webrtc\xplatform\webrtc\ortc\zsLib-eventing ortc\xplatform\zsLib-eventing
+
+IF %platform_win32% EQU 1 (
+    CALL:makeLink . webrtc\xplatform\webrtc\ortc\curl ortc\xplatform\curl
+)
+
+GOTO:EOF
+
+:buildPeerCCServer
+  IF NOT "%platform%"=="all" (
+    IF NOT "%platform%"=="win32" CALL bin\prepareWebRtc.bat -platform win32 -logLevel %logLevel%
+  )
+  
+  CALL:print %info% "Building PeerConnection server"
+  CALL bin\buildWebRtc.bat Release win32 webrtc/examples:peerconnection_server
+  IF !ERRORLEVEL! EQU 0 (
+    CALL:copyTemplates webrtc\xplatform\webrtc\out\win_x86_release\peerconnection_server.exe .\bin\
+  )
+GOTO:EOF
+
+:downloadBinariesFromRepo
+ECHO.
+CALL:print %info% "Donwloading binaries from repo !BINARIES_DOWNLOAD_REPO_URL!"
+IF EXIST ..\ortc-binaries\NUL RMDIR /q /s ..\ortc-binaries\
+	
+PUSHD ..\
+CALL git clone !BINARIES_DOWNLOAD_REPO_URL! -b !BINARIES_DOWNLOAD_REPO_BRANCH! > NUL
+IF !ERRORLEVEL! EQU 1 CALL:error 1 "Failed cloning binaries."
+POPD
+	
+CALL:makeDirectory %ortciOSBinariesDestinationFolder%
+CALL:copyTemplates ..\ortc-binaries\Release\libOrtc.dylib %ortciOSBinariesDestinationPath%
+	
+IF EXIST ..\ortc-binaries\NUL RMDIR /q /s ..\ortc-binaries\
+GOTO:EOF
+
+:downloadBinariesFromURL
+ECHO.
+CALL:print %info% "Donwloading binaries from URL !BINARIES_DOWNLOAD_URL!"
+
+CALL:makeDirectory %ortciOSBinariesDestinationFolder%
+CALL:download !BINARIES_DOWNLOAD_URL! %ortciOSBinariesDestinationPath%
+IF !taskFailed! EQU 1 CALL:ERROR 1 "Failed downloading binaries from !BINARIES_DOWNLOAD_URL!"
+
+GOTO:EOF
+
+:getBinaries
+
+IF %getBinaries% EQU 1 (
+	IF DEFINED BINARIES_DOWNLOAD_REPO_URL (
+		CALL:downloadBinariesFromRepo
+	) ELSE (
+		IF DEFINED BINARIES_DOWNLOAD_URL CALL:downloadBinariesFromURL
+	)
+)
+
+GOTO:EOF
+
 
 REM Download file (first argument) to desired destination (second argument)
 :download
@@ -556,7 +696,7 @@ GOTO:EOF
 REM Create symbolic link (first argument), that will point to desired file (second argument)
 :makeLinkToFile
 
-IF EXIST %~1 GOTO:alreadyexists
+IF EXIST %~1 GOTO:filelinkalreadyexists
 IF NOT EXIST %~2 CALL:error 1 "%folderStructureError:"=% %~2 does not exist!"
 
 CALL:print %trace% Creating symbolic link "%~1" for the file "%~2"
@@ -570,8 +710,28 @@ IF %logLevel% GEQ %trace% (
 )
 IF %ERRORLEVEL% NEQ 0 CALL:ERROR 1 "COULD NOT CREATE SYMBOLIC LINK TO %~2"
 
+:filelinkalreadyexists
+
+GOTO:EOF
+:makeLink
+IF NOT EXIST %~1\NUL CALL:error 1 "%folderStructureError:"=% %~1 does not exist!"
+
+::PUSHD %~1
+IF EXIST .\%~2\NUL GOTO:alreadyexists
+IF NOT EXIST %~3\NUL CALL:error 1 "%folderStructureError:"=% %~3 does not exist!"
+
+CALL:print %trace% In path "%~1" creating symbolic link for "%~2" to "%~3"
+
+IF %logLevel% GEQ %trace% (
+	MKLINK /J %~2 %~3
+) ELSE (
+	MKLINK /J %~2 %~3  >NUL
+)
+
+IF %ERRORLEVEL% NEQ 0 CALL:ERROR 1 "COULD NOT CREATE SYMBOLIC LINK TO %~2 FROM %~3"
+
 :alreadyexists
-POPD
+::  POPD
 
 GOTO:EOF
 
@@ -580,11 +740,12 @@ REM Copy all ORTC template required to set developer environment
 
 IF NOT EXIST %~1 CALL:error 1 "%folderStructureError:"=% %~1 does not exist!"
 
+echo COPY %~1 %~2
 COPY %~1 %~2 >NUL
 
 CALL:print %trace% Copied file %~1 to %~2
 
-IF %ERRORLEVEL% NEQ 0 CALL:error 1 "%folderStructureError:"=% Unable to copy WebRTC temaple solution file"
+IF %ERRORLEVEL% NEQ 0 CALL:error 1 "%folderStructureError:"=% Unable to copy WebRTC template solution file"
 
 GOTO:EOF
 
@@ -592,32 +753,6 @@ GOTO:EOF
 IF EXIST ortc\NUL SET ortcAvailable=1
 GOTO:EOF
 
-:installNinja
-
-WHERE ninja > NUL 2>&1
-IF !ERRORLEVEL! EQU 1 (
-
-	CALL:print %trace% "Ninja is not in the path"
-	
-	IF NOT EXIST .\bin\ninja.exe (
-		CALL:print %trace% "Downloading ninja ..."
-		CALL:download %ninjaDownloadUrl% %ninjaDestinationPath%
-
-		IF EXIST .\bin\ninja-win.zip (
-			CALL::print %trace% "Unarchiving ninja-win.zip ..."
-			CALL:unzipfile "%~dp0" "%~dp0ninja-win.zip" 
-		) ELSE (
-			CALL:error 0 "Ninja is not installed. Win32 projects cwon't be buildable."
-		)
-	)
-	
-	IF EXIST .\bin\ninja.exe (
-		CALL::print %trace% "Updating projects ..."
-		START /B /wait .\bin\upn.exe .\bin\ .\webrtc\xplatform\webrtc\ .\webrtc\xplatform\webrtc\chromium\src\
-	)
-)
-
-GOTO:EOF
 
 :unzipfile 
 SET vbs="%temp%\_.vbs"
@@ -634,6 +769,51 @@ IF EXIST %vbs% DEL /f /q %vbs%
 CSCRIPT //nologo %vbs%
 IF EXIST %vbs% DEL /f /q %vbs%
 DEL /f /q %2
+GOTO:EOF
+
+
+:depotToolsPathCheck
+CALL:print %trace% "depotToolsPathCheck entered..."
+
+SET numberOfRemoved=0
+SET oldPath=%PATH%
+rem echo Old path: !oldPath!
+
+FOR %%A IN ("%path:;=";"%") DO (
+rem    echo %%~A
+    SET aux3=%%~A\depot-tools-auth
+rem    echo !aux3! 
+    
+    IF EXIST "!aux3!" (
+rem     echo Before modification !PATH! 
+        echo Remove %%~A from path       
+        CALL SET PATH=%%PATH:;%%~A=%%
+        CALL SET PATH=%%PATH:%%~A;=%%
+rem     echo Modified path: !PATH!
+
+        SET /A numberOfRemoved=numberOfRemoved+1
+        CALL:print %trace% "numberOfRemoved: !numberOfRemoved!"        
+    ) 
+)
+GOTO:EOF
+
+
+:restorePathEnv
+CALL:print %trace% "restorePathEnv entered..."
+CALL:print %trace% "Number of paths temporarily removed from environment PATH: !numberOfRemoved!"
+
+IF %numberOfRemoved% GTR 0  (     
+    set PATH=!oldPath!
+)
+rem echo Restored PATH = !PATH!
+GOTO:EOF
+
+
+:cleanup
+IF EXIST %webrtcGnPath%originalBuild.gn (
+    DEL %webrtcGnPath%BUILD.gn
+    REN %webrtcGnPath%originalBuild.gn BUILD.gn
+)
 GOTO:EOF
 
 :showHelp
@@ -689,6 +869,7 @@ IF %criticalError%==0 (
 	ECHO.
 	CALL:print %error% "FAILURE:Preparing environment has failed!"
 	ECHO.
+    CALL:cleanup
 	SET endTime=%time%
 	CALL:showTime
 	::terminate batch execution
@@ -726,6 +907,8 @@ GOTO:EOF
 :done
 ECHO.
 CALL:print %info% "Success: Development environment is set."
+CALL:cleanup
+CALL:restorePathEnv
 SET endTime=%time%
 CALL:showTime
 ECHO. 
